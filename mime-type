@@ -1,0 +1,17 @@
+mime-type() {
+    local f=$1
+    local bname=${f##*/}
+    local ext=${bname##*.}
+    [[ $bname == "$ext" ]] && ext=
+
+    case "$ext" in
+     html htm) echo 'text/html';;
+     jpeg|jpg) echo 'image/jpeg';;
+          png) echo 'image/png';;
+          txt) echo 'text/plain';;
+          css) echo 'text/css';;
+           js) echo 'text/javascript';;
+         json) echo 'application/json';;
+            *) echo 'application/octet-stream'
+    esac
+}
