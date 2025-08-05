@@ -14,6 +14,44 @@ urldecode() {
     printf '%b\n' "${_//%/\\x}"
 }
 
+normalize-path() {
+    local path=/$1
+
+    IFS='/' read -r -a parts <<< "$path"
+
+    local part
+    local -a out=()
+    for part in "${parts[@]}"; do
+        case $part in
+        '') ;; # ignore empty dir (multiple /)
+        '.') ;; # ignore current dir
+        '..') unset 'out[-1]' 2>/dev/null;;
+        *) out+=("$part");;
+        esac
+    done
+
+    local string
+    string=$(IFS=/; echo "${out[*]}")
+    echo "/$string"
+}
+
+list-directory() {
+    local d=$1
+
+    shopt -s nullglob dotglob
+    
+    echo '<h1>Directory Listing</h1>'
+    echo "<h2>Directory: $d</h2>"
+    echo '<hr>'
+    echo '<ul>'
+    for f in .. "$d"/*; do
+        f=${f##*/}
+        printf '<li><a href="%s">%s</a></li>\n' \ "$f" "$f"
+    done
+    echo '</ul>'
+    echo '</hr>'
+}
+
 parse-request() {
 
     declare -gA REQ_INFO=()
@@ -60,26 +98,35 @@ process-request() {
     parse-request <&"$fd"
 
     #validate the request
-    [[ ${REQ_INFO[version]} == 'HTTP/1.1' ]] || fatal 'Unsupported HTTP version'
-    [[ ${REQ_INFO[method]} == 'GET' ]] || fatal 'Unsupported HTTP method'
-    [[ ${REQ_INFO[path]} == /* ]] || fatal 'invalid path'
+    # [[ ${REQ_INFO[version]} == 'HTTP/1.1' ]] || fatal 'Unsupported HTTP version'
+    # [[ ${REQ_INFO[method]} == 'GET' ]] || fatal 'Unsupported HTTP method'
+    # [[ ${REQ_INFO[path]} == /* ]] || fatal 'invalid path'
 
-    echo "${REQ_INFO[method]} ${REQ_INFO[path]}"
+    echo "$ip ${REQ_INFO[method]} ${REQ_INFO[path]}"
 
     # if we are here, we should reply to the caller
     # /foo%20bar.txt?query=something
     local path=${REQ_INFO[path]}
 
-    # "foo%20bar.txt?query=whatever"
+    # "./.foo%20bar.txt?query=whatever"
     path=${path:1}
 
-    # "foo%20bar.txt"
+    # "././foo%20bar.txt"
     local query
     IFS='?' read -r path query <<< "$path"
 
-    # "foo bar.txt"
+    # "././foo bar.txt"
     path=$(urldecode "$path")
 
+    # "././foo bar.txt"
+    path=$(normalize-path "$path")
+
+    # "foo bar.txt"
+    path=${path:1}
+
+    # handle empty path(root path)
+    path=${path:-.}
+    # path=${path:-'index.html'}
     echo "trying to find file '$path'"
 
 
@@ -88,6 +135,11 @@ process-request() {
         printf 'Content-Type: text/plain\r\n' >&"$fd"
         printf '\r\n' >&"$fd"
         cat "$path" >&"$fd"
+    elif [[ -d $path ]]; then
+        printf 'HTTP/1.1 200 OK\r\n' >&"$fd"
+        printf 'Content-Type: text/html\r\n' >&"$fd"
+        printf '\r\n' >&"$fd"
+        list-directory "$path" >&"$fd"
     else
         printf 'HTTP/1.1 404 Not Found\r\n' >&"$fd"
         printf '\r'
