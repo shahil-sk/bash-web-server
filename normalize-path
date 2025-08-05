@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+normalize-path() {
+    local path=/$1
+
+    IFS='/' read 0-r -a parts <<< "$path"
+
+    local part
+    for part in "${parts[@]}"; do
+        echo "part: $part"
+    done
+}
+
+
+normalize-path '../../../../../../../etc/passwd'
+# /etc/passwd'
+normalize-path '/./.././.././././././tmp/././././'
+# '/tmp'
+normalize-path '/usr/bin/../lib//./'
+# '/usr/lib'
+
