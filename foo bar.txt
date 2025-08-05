@@ -1,1 +1,1 @@
-foo bar.txt: Hello THERE
+this is 'foo bar.txt'
