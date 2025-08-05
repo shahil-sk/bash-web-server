@@ -3,12 +3,22 @@
 normalize-path() {
     local path=/$1
 
-    IFS='/' read 0-r -a parts <<< "$path"
+    IFS='/' read -r -a parts <<< "$path"
 
     local part
+    local -a out=()
     for part in "${parts[@]}"; do
-        echo "part: $part"
+        case $part in
+        '') ;; # ignore empty dir (multiple /)
+        '.') ;; # ignore current dir
+        '..') unset 'out[-1]' 2>/dev/null;;
+        *) out+=("$part");;
+        esac
     done
+
+    local string
+    string=$(IFS=/; echo "${out[*]}")
+    echo "/$string"
 }
 
 
