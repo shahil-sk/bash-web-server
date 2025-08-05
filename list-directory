@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+list-directory() {
+    local d=$1
+
+    shopt -s nullglob dotglob
+    
+    echo '<h1>Directory Listing</h1>'
+    echo "<h2>Directory: $d</h2>"
+    echo '<hr>'
+    echo '<ul>'
+    for f in .. "$d"/*; do
+        f=${f##*/}
+        printf '<li><a href="%s">%s</a></li>\n' \ "$f" "$f"
+    done
+    echo '</ul>'
+    echo '</hr>'
+}
+
+list-directory "dir"
