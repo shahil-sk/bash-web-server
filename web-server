@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+PORT=8080
+ADDRESS=0.0.0.0
+
+fatal() {
+    echo '[fatal]' "$@" >&2
+    exit
+}
+
+urldecode() {
+    # Usage: urldecode "string"
+    : "${1//+/ }"
+    printf '%b\n' "${_//%/\\x}"
+}
+
+parse-request() {
+
+    declare -gA REQ_INFO=()
+    declare -gA REQ_HEADERS=()
+
+    local state='status'
+    local line
+
+    while read -r line; do
+        line=${line%$'\r'}
+
+        case "$state" in
+                'status')
+                        # parse the status line
+                        # "GET /foo.txt HTTP/1.1"
+                        local method path version
+                        read -r method path version <<< "$line"
+                        REQ_INFO[method]=$method
+                        REQ_INFO[path]=$path
+                        REQ_INFO[version]=$version
+                        state='headers'
+                        ;;
+                'headers')
+                        # parse the headers
+                        if [[ -z $line ]]; then
+                            # doesnt support body parsing
+                            break
+                        fi
+                        local key value
+                        IFS=: read -r key value <<< $line
+                        key=${key,,}
+                        value=${value# *}
+                        REQ_HEADERS[$key]=$value
+                        ;;
+                'body')
+                        fatal 'body parsing not supported'
+                        ;;
+        esac
+    done
+}
+
+process-request() {
+    local fd=$1
+    parse-request <&"$fd"
+
+    #validate the request
+    [[ ${REQ_INFO[version]} == 'HTTP/1.1' ]] || fatal 'Unsupported HTTP version'
+    [[ ${REQ_INFO[method]} == 'GET' ]] || fatal 'Unsupported HTTP method'
+    [[ ${REQ_INFO[path]} == /* ]] || fatal 'invalid path'
+
+    echo "${REQ_INFO[method]} ${REQ_INFO[path]}"
+
+    # if we are here, we should reply to the caller
+    # /foo%20bar.txt?query=something
+    local path=${REQ_INFO[path]}
+
+    # "foo%20bar.txt?query=whatever"
+    path=${path:1}
+
+    # "foo%20bar.txt"
+    local query
+    IFS='?' read -r path query <<< "$path"
+
+    # "foo bar.txt"
+    path=$(urldecode "$path")
+
+    echo "trying to find file '$path'"
+
+
+    if [[ -f $path ]]; then
+        printf 'HTTP/1.1 200 OK\r\n' >&"$fd"
+        printf 'Content-Type: text/plain\r\n' >&"$fd"
+        printf '\r\n' >&"$fd"
+        cat "$path" >&"$fd"
+    else
+        printf 'HTTP/1.1 404 Not Found\r\n' >&"$fd"
+        printf '\r'
+    fi
+
+    exec {fd}>&-
+}
+
+main() {
+
+    enable accept || fatal 'failed to load accept'
+    local fd ip
+    echo "Listing on https://$ADDRESS:$PORT"
+
+    while true;
+        do
+            accept -b "$ADDRESS" -v fd -r ip "$PORT" || fatal 'failed to read socket'
+            process-request "$fd"
+        done
+    
+}
+
+main "$@"
