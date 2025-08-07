@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 
+VERSION='v1.0.0'
+
 PORT=8080
 ADDRESS=0.0.0.0
 DIR='.'
+
+read -d '' -r USAGE <<- EOF
+Usage: bash-web-server [-p port] [-b addr] [-d dir]
+
+An HTTP server in Pure Bash.
+
+Options
+  -b <addr>  Address to bind to, defaults to 0.0.0.0.
+  -d <dir>   Directory to serve, defaults to your current directory.
+  -h         Print this message and exit.
+  -p <port>  Port to bind to, defaults to 8080.
+  -v         Print the version number and exit.
+EOF
 
 fatal() {
     echo '[fatal]' "$@" >&2
@@ -222,11 +237,13 @@ main() {
     enable accept || fatal 'failed to load accept'
 
     local OPTIND opt 
-    while getopts 'b:p:d:' opt; do
+    while getopts 'b:hp:h:v' opt; do
         case "$opt" in 
             b) ADDRESS=$OPTARG ;;
             p) PORT=$OPTARG ;;
             d) DIR=$OPTARG ;;
+            h) echo "$USAGE" && exit 0;;
+			v) echo "$VERSION" && exit 0;;
             *) fatal "bad option";;
         esac
     done
