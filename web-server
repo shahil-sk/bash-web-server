@@ -2,6 +2,7 @@
 
 PORT=8080
 ADDRESS=0.0.0.0
+DIR='.'
 
 fatal() {
     echo '[fatal]' "$@" >&2
@@ -12,6 +13,72 @@ urldecode() {
     # Usage: urldecode "string"
     : "${1//+/ }"
     printf '%b\n' "${_//%/\\x}"
+}
+
+urlencode() {
+    # Usage: urlencode "string"
+    local LC_ALL=C
+    for (( i = 0; i < ${#1}; i++ )); do
+        : "${1:i:1}"
+        case "$_" in
+            [a-zA-Z0-9.~_-])
+                printf '%s' "$_"
+            ;;
+
+            *)
+                printf '%%%02X' "'$_"
+            ;;
+        esac
+    done
+    printf '\n'
+}
+
+html-encode() {
+    local s=$1
+
+    # doing basic html encodeing by replacing the character with bash equilent
+    s=${s//&/\&amp; }
+    s=${s//</\&lt;}
+    s=${s//>/\&gt; }
+    s=${s//\"\\&quot;}
+    s=${s//\'/\&apos;}
+
+    echo "$s"
+}
+
+list-directory() {
+    local d=$1
+
+    shopt -s nullglob dotglob
+
+    echo '<h1>Directory Listing</h1>'
+    echo "<h2>Directory: $(html-encode "$d")</h2>"
+    echo '<hr>'
+    echo '<ul>'
+    for f in .. "$d"/*; do
+        f=${f##*/}
+        printf '<li><a href="%s">%s</a></li>\n' $(urlencode "$f") $(html-encode "$f")
+    done
+    echo '</ul>'
+    echo '</hr>'
+}
+
+mime-type() {
+    local f=$1
+    local bname=${f##*/}
+    local ext=${bname##*.}
+    [[ $bname == "$ext" ]] && ext=
+
+    case "$ext" in
+     html|htm) echo 'text/html';;
+     jpeg|jpg) echo 'image/jpeg';;
+          png) echo 'image/png';;
+          txt) echo 'text/plain';;
+          css) echo 'text/css';;
+           js) echo 'text/javascript';;
+         json) echo 'application/json';;
+            *) echo 'application/octet-stream'
+    esac
 }
 
 normalize-path() {
@@ -35,22 +102,6 @@ normalize-path() {
     echo "/$string"
 }
 
-list-directory() {
-    local d=$1
-
-    shopt -s nullglob dotglob
-    
-    echo '<h1>Directory Listing</h1>'
-    echo "<h2>Directory: $d</h2>"
-    echo '<hr>'
-    echo '<ul>'
-    for f in .. "$d"/*; do
-        f=${f##*/}
-        printf '<li><a href="%s">%s</a></li>\n' \ "$f" "$f"
-    done
-    echo '</ul>'
-    echo '</hr>'
-}
 
 parse-request() {
 
@@ -98,9 +149,9 @@ process-request() {
     parse-request <&"$fd"
 
     #validate the request
-    # [[ ${REQ_INFO[version]} == 'HTTP/1.1' ]] || fatal 'Unsupported HTTP version'
-    # [[ ${REQ_INFO[method]} == 'GET' ]] || fatal 'Unsupported HTTP method'
-    # [[ ${REQ_INFO[path]} == /* ]] || fatal 'invalid path'
+    [[ ${REQ_INFO[version]} == 'HTTP/1.1' ]] || fatal 'Unsupported HTTP version'
+    [[ ${REQ_INFO[method]} == 'GET' ]] || fatal 'Unsupported HTTP method'
+    [[ ${REQ_INFO[path]} == /* ]] || fatal 'invalid path'
 
     echo "$ip ${REQ_INFO[method]} ${REQ_INFO[path]}"
 
@@ -127,37 +178,70 @@ process-request() {
     # handle empty path(root path)
     path=${path:-.}
     # path=${path:-'index.html'}
-    echo "trying to find file '$path'"
 
+    # try to serve an index page
+    local totry=(
+        "$path"
+        "$path/index.html"
+        "$path/index.htm"
+    )
+    local try file
 
-    if [[ -f $path ]]; then
+    for try in "${totry[@]}"; do
+        if [[ -f $try ]]; then
+            file=$try
+            break
+        fi
+    done
+
+    if [[ -n $file ]]; then
+        # a static file was found
+        local mime
+        mime=$(mime-type "$file")
+
         printf 'HTTP/1.1 200 OK\r\n' >&"$fd"
-        printf 'Content-Type: text/plain\r\n' >&"$fd"
+        printf 'Content-Type: %s\r\n' $mime >&"$fd"
         printf '\r\n' >&"$fd"
-        cat "$path" >&"$fd"
+        cat "$file" >&"$fd"
     elif [[ -d $path ]]; then
+        # try directory listing
         printf 'HTTP/1.1 200 OK\r\n' >&"$fd"
         printf 'Content-Type: text/html\r\n' >&"$fd"
         printf '\r\n' >&"$fd"
         list-directory "$path" >&"$fd"
     else
+        # nothing was found
         printf 'HTTP/1.1 404 Not Found\r\n' >&"$fd"
         printf '\r'
     fi
 
-    exec {fd}>&-
 }
 
 main() {
 
     enable accept || fatal 'failed to load accept'
+
+    local OPTIND opt 
+    while getopts 'b:p:d:' opt; do
+        case "$opt" in 
+            b) ADDRESS=$OPTARG ;;
+            p) PORT=$OPTARG ;;
+            d) DIR=$OPTARG ;;
+            *) fatal "bad option";;
+        esac
+    done
+
     local fd ip
     echo "Listing on https://$ADDRESS:$PORT"
+
+    cd "$DIR" || fatal "faild to move to $DIR"
+    echo "serving out of $DIR"
 
     while true;
         do
             accept -b "$ADDRESS" -v fd -r ip "$PORT" || fatal 'failed to read socket'
-            process-request "$fd"
+            process-request "$fd" &
+            exec {fd}>&-
         done
     
 }
